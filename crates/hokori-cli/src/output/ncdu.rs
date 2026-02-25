@@ -37,4 +37,5 @@ pub fn render(result: &ScanResult, roots: &[std::path::PathBuf]) {
     }
 
     writeln!(w, "]").unwrap();
+    w.flush().unwrap();
 }
