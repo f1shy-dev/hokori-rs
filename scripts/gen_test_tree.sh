@@ -5,6 +5,10 @@ OUTPUT="${1:-/tmp/hokori-bench-tree}"
 NUM_FILES="${2:-100000}"
 NUM_DIRS="${3:-5000}"
 MAX_DEPTH="${4:-10}"
+FAST="${FAST:-false}"
+SEED="${SEED:-1337}"
+
+RANDOM="$SEED"
 
 echo "Generating test tree: $NUM_FILES files, $NUM_DIRS dirs, depth $MAX_DEPTH"
 echo "Output: $OUTPUT"
@@ -31,7 +35,11 @@ for ((i=0; i<NUM_FILES; i++)); do
     dir_idx=$((RANDOM % ${#dirs[@]}))
     size_idx=$((RANDOM % ${#sizes[@]}))
     size=${sizes[$size_idx]}
-    dd if=/dev/urandom of="${dirs[$dir_idx]}/f$i" bs=1 count="$size" 2>/dev/null
+    if [ "$FAST" = "true" ]; then
+        touch "${dirs[$dir_idx]}/f$i"
+    else
+        dd if=/dev/urandom of="${dirs[$dir_idx]}/f$i" bs=1 count="$size" 2>/dev/null
+    fi
 
     if ((i % 10000 == 0)); then
         echo "  Created $i / $NUM_FILES files..."

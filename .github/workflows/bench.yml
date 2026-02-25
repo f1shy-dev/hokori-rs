@@ -1,0 +1,56 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate test tree
+        run: |
+          FAST=true SEED=1337 bash scripts/gen_test_tree.sh /tmp/hokori-bench-tree 50000 2000 8
+
+      - name: Run benchmarks
+        run: |
+          cargo bench --bench dedup_bench -- --output-format bencher | tee bench_output.txt
+        env:
+          BENCH_TARGET: /tmp/hokori-bench-tree
+
+      - name: Throughput benchmark
+        run: |
+          cargo build --release -p hokori-cli
+          best_throughput=0
+          for i in 1 2 3; do
+            output=$(cargo run --release -p hokori-cli -- --stats -q /tmp/hokori-bench-tree 2>&1)
+            throughput=$(echo "$output" | grep "throughput:" | awk '{print $2}')
+            throughput_int=${throughput%.*}
+            throughput_int=${throughput_int:-0}
+            if [ "$throughput_int" -gt "$best_throughput" ]; then
+              best_throughput=$throughput_int
+            fi
+          done
+          echo "Best throughput: $best_throughput files/sec"
+          echo "throughput=$best_throughput" >> "$GITHUB_ENV"
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: hokori-rs Benchmarks
+          tool: cargo
+          output-file-path: bench_output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: ${{ github.ref == 'refs/heads/main' }}
+          comment-on-alert: true
+          alert-threshold: '120%'
+          fail-on-alert: false
+          alert-comment-cc-users: '@f1shy-dev'
