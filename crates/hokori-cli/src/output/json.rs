@@ -1,4 +1,5 @@
 use hokori_scan::ScanResult;
+use hokori_scan::tree::TreeNode;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -9,6 +10,8 @@ struct JsonOutput {
     error_count: u64,
     deduped_count: u64,
     roots: Vec<JsonRoot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tree: Option<Vec<JsonTreeNode>>,
 }
 
 #[derive(Serialize)]
@@ -17,6 +20,18 @@ struct JsonRoot {
     total_size: u64,
     file_count: u64,
     dir_count: u64,
+}
+
+#[derive(Serialize)]
+struct JsonTreeNode {
+    name: String,
+    apparent_size: u64,
+    disk_usage: u64,
+    file_count: u64,
+    dir_count: u64,
+    is_dir: bool,
+    depth: u16,
+    children: Vec<JsonTreeNode>,
 }
 
 pub fn render(result: &ScanResult, _errors: &[impl std::fmt::Display]) {
@@ -36,6 +51,23 @@ pub fn render(result: &ScanResult, _errors: &[impl std::fmt::Display]) {
                 dir_count: r.dir_count,
             })
             .collect(),
+        tree: result
+            .tree
+            .as_ref()
+            .map(|tree| tree.iter().map(to_json_node).collect()),
     };
     println!("{}", serde_json::to_string(&output).unwrap());
+}
+
+fn to_json_node(node: &TreeNode) -> JsonTreeNode {
+    JsonTreeNode {
+        name: String::from_utf8_lossy(&node.name).into_owned(),
+        apparent_size: node.apparent_size,
+        disk_usage: node.disk_usage,
+        file_count: node.file_count,
+        dir_count: node.dir_count,
+        is_dir: node.is_dir,
+        depth: node.depth,
+        children: node.children.iter().map(to_json_node).collect(),
+    }
 }
