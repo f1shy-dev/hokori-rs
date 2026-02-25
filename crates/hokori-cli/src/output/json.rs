@@ -1,5 +1,4 @@
 use hokori_scan::ScanResult;
-use hokori_scan::tree::TreeNode;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -51,15 +50,18 @@ pub fn render(result: &ScanResult, _errors: &[impl std::fmt::Display]) {
                 dir_count: r.dir_count,
             })
             .collect(),
-        tree: result
-            .tree
-            .as_ref()
-            .map(|tree| tree.iter().map(to_json_node).collect()),
+        tree: result.tree.as_ref().map(|tree| {
+            tree.root_indices
+                .iter()
+                .map(|&idx| tree_to_json_nodes(tree, idx))
+                .collect()
+        }),
     };
     println!("{}", serde_json::to_string(&output).unwrap());
 }
 
-fn to_json_node(node: &TreeNode) -> JsonTreeNode {
+fn tree_to_json_nodes(tree: &hokori_scan::tree::BuiltTree, idx: u32) -> JsonTreeNode {
+    let node = &tree.nodes[idx as usize];
     JsonTreeNode {
         name: String::from_utf8_lossy(&node.name).into_owned(),
         apparent_size: node.apparent_size,
@@ -68,6 +70,9 @@ fn to_json_node(node: &TreeNode) -> JsonTreeNode {
         dir_count: node.dir_count,
         is_dir: node.is_dir,
         depth: node.depth,
-        children: node.children.iter().map(to_json_node).collect(),
+        children: tree
+            .children(idx)
+            .map(|(child_idx, _)| tree_to_json_nodes(tree, child_idx))
+            .collect(),
     }
 }

@@ -1,5 +1,4 @@
 use hokori_scan::ScanResult;
-use hokori_scan::tree::TreeNode;
 use human_bytes::human_bytes;
 
 pub fn render(result: &ScanResult, errors: &[impl std::fmt::Display], cli: &super::super::Cli) {
@@ -23,21 +22,11 @@ pub fn render(result: &ScanResult, errors: &[impl std::fmt::Display], cli: &supe
 
     if let Some(n) = cli.top.filter(|n| *n > 0) {
         if let Some(tree) = &result.tree {
-            let mut dirs = Vec::new();
-            for root in tree {
-                let mut root_path = String::from_utf8_lossy(&root.name).into_owned();
-                if root_path.is_empty() {
-                    root_path = "/".to_string();
-                }
-                collect_dirs(root, &root_path, cli.apparent_size, false, &mut dirs);
-            }
-
-            dirs.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-
+            let dirs = tree.top_dirs(n, cli.apparent_size);
             println!();
             println!("Top {} directories:", n);
-            for (size, path) in dirs.into_iter().take(n) {
-                println!("{:>10}  {}", human_bytes(size as f64), path);
+            for (size, path) in &dirs {
+                println!("{:>10}  {}", human_bytes(*size as f64), path);
             }
         }
     }
@@ -49,35 +38,6 @@ pub fn render(result: &ScanResult, errors: &[impl std::fmt::Display], cli: &supe
         }
         if errors.len() > 10 {
             eprintln!("... and {} more errors", errors.len() - 10);
-        }
-    }
-}
-
-fn collect_dirs(
-    node: &TreeNode,
-    path: &str,
-    use_apparent: bool,
-    include_current: bool,
-    out: &mut Vec<(u64, String)>,
-) {
-    if node.is_dir {
-        if include_current {
-            let size = if use_apparent {
-                node.apparent_size
-            } else {
-                node.disk_usage
-            };
-            out.push((size, path.to_string()));
-        }
-
-        for child in &node.children {
-            let child_name = String::from_utf8_lossy(&child.name);
-            let child_path = if path == "/" {
-                format!("/{child_name}")
-            } else {
-                format!("{path}/{child_name}")
-            };
-            collect_dirs(child, &child_path, use_apparent, true, out);
         }
     }
 }
