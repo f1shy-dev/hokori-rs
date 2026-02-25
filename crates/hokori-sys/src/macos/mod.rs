@@ -38,7 +38,7 @@ pub fn stat_entry(dir_fd: i32, name: &std::ffi::CStr) -> Result<EntryMetadata, S
 
     Ok(EntryMetadata {
         ino: st.st_ino,
-        dev: st.st_dev,
+        dev: st.st_dev as u64,
         size: st.st_size as u64,
         blocks: st.st_blocks as u64,
         alloc_size: st.st_blocks as u64 * 512,
