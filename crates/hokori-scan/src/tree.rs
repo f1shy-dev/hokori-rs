@@ -20,15 +20,17 @@ pub struct TreeNode {
 pub struct TreeBuilder {
     nodes: Vec<TreeNode>,
     path_to_idx: HashMap<Vec<u8>, NodeIdx>,
-    paths: Vec<Vec<u8>>,
 }
 
 impl TreeBuilder {
     pub fn new() -> Self {
+        Self::with_capacity(0)
+    }
+
+    pub fn with_capacity(estimated_entries: usize) -> Self {
         Self {
-            nodes: Vec::new(),
-            path_to_idx: HashMap::new(),
-            paths: Vec::new(),
+            nodes: Vec::with_capacity(estimated_entries),
+            path_to_idx: HashMap::with_capacity(estimated_entries),
         }
     }
 
@@ -41,7 +43,6 @@ impl TreeBuilder {
         depth: u16,
     ) {
         let idx = self.nodes.len() as NodeIdx;
-        let path_vec = path.to_vec();
         let name = path.rsplit(|&b| b == b'/').next().unwrap_or(path).to_vec();
 
         self.nodes.push(TreeNode {
@@ -57,8 +58,8 @@ impl TreeBuilder {
             next_sibling: NONE,
         });
 
-        self.path_to_idx.insert(path_vec.clone(), idx);
-        self.paths.push(path_vec);
+        // PERF: For further allocation reduction, consider hashbrown raw_entry + arena-backed keys.
+        self.path_to_idx.insert(path.to_vec(), idx);
     }
 
     pub fn build(mut self, roots: &[std::path::PathBuf]) -> BuiltTree {
@@ -90,14 +91,18 @@ impl TreeBuilder {
                     next_sibling: NONE,
                 });
                 self.path_to_idx.insert(root_bytes.clone(), idx);
-                self.paths.push(root_bytes);
             }
         }
 
+        let mut idx_to_path: Vec<&[u8]> = vec![b""; self.nodes.len()];
+        for (path, &idx) in &self.path_to_idx {
+            idx_to_path[idx as usize] = path.as_slice();
+        }
+
         for idx in 0..self.nodes.len() as NodeIdx {
-            let path = &self.paths[idx as usize];
+            let path = idx_to_path[idx as usize];
             if let Some(parent_path) = parent_path(path) {
-                if let Some(&parent_idx) = self.path_to_idx.get(&parent_path) {
+                if let Some(&parent_idx) = self.path_to_idx.get(parent_path) {
                     if parent_idx != idx {
                         self.nodes[idx as usize].parent = parent_idx;
                         let old_first = self.nodes[parent_idx as usize].first_child;
@@ -148,11 +153,11 @@ impl TreeBuilder {
     }
 }
 
-fn parent_path(path: &[u8]) -> Option<Vec<u8>> {
+fn parent_path(path: &[u8]) -> Option<&[u8]> {
     path.iter()
         .rposition(|&b| b == b'/')
         .filter(|&pos| pos > 0)
-        .map(|pos| path[..pos].to_vec())
+        .map(|pos| &path[..pos])
 }
 
 #[derive(Debug, Clone)]
