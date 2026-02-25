@@ -3,7 +3,7 @@ name = "hokori-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The world's fastest disk scanner CLI"
+description = "The world's fastest disk scanner"
 
 [[bin]]
 name = "hokori"
@@ -11,3 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 hokori-scan = { path = "../hokori-scan" }
+hokori-sys = { path = "../hokori-sys" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+indicatif = "0.17"
+human_bytes = "0.4"
