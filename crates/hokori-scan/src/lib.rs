@@ -123,8 +123,13 @@ impl Scanner {
                             .iter()
                             .position(|root| entry_path.starts_with(&root.path));
 
-                        let mut size = match config.size_mode {
-                            SizeMode::DiskUsage | SizeMode::ApparentSize => entry.size.unwrap_or(0),
+                        let size = match config.size_mode {
+                            SizeMode::DiskUsage => {
+                                entry.disk_usage.or(entry.apparent_size).unwrap_or(0)
+                            }
+                            SizeMode::ApparentSize => {
+                                entry.apparent_size.or(entry.disk_usage).unwrap_or(0)
+                            }
                         };
 
                         if entry.is_file() {
@@ -132,12 +137,6 @@ impl Scanner {
                                 if !dedup.check_and_insert(entry.dev, entry.ino) {
                                     aggregator.add_deduped();
                                     continue;
-                                }
-                            }
-
-                            if entry.size.is_none() {
-                                if let Ok(meta) = std::fs::metadata(&entry_path) {
-                                    size = meta.len();
                                 }
                             }
 

@@ -161,6 +161,7 @@ impl WalkerWorker {
                         FileType::Directory,
                         raw.ino,
                         raw.size,
+                        raw.size,
                         current_dev,
                         None,
                     );
@@ -180,6 +181,7 @@ impl WalkerWorker {
                                     next_depth,
                                     meta.file_type,
                                     meta.ino,
+                                    Some(meta.size),
                                     Some(meta.alloc_size),
                                     meta.dev,
                                     Some(meta.nlink),
@@ -199,6 +201,7 @@ impl WalkerWorker {
                                     FileType::Unknown,
                                     raw.ino,
                                     None,
+                                    None,
                                     current_dev,
                                     None,
                                 );
@@ -216,6 +219,7 @@ impl WalkerWorker {
                         FileType::Symlink,
                         raw.ino,
                         raw.size,
+                        raw.size,
                         current_dev,
                         None,
                     );
@@ -231,14 +235,49 @@ impl WalkerWorker {
                     }
                 }
                 _ => {
+                    let (apparent, disk, ino, dev, nlink) = if raw.size.is_some() {
+                        let name_c = CString::new(raw.name.clone()).ok();
+                        if let Some(name_c) = name_c {
+                            match hokori_sys::platform::stat_entry(fd, &name_c) {
+                                Ok(meta) => (
+                                    Some(meta.size),
+                                    Some(meta.alloc_size),
+                                    meta.ino,
+                                    meta.dev,
+                                    Some(meta.nlink),
+                                ),
+                                Err(_) => (raw.size, raw.size, raw.ino, current_dev, None),
+                            }
+                        } else {
+                            (raw.size, raw.size, raw.ino, current_dev, None)
+                        }
+                    } else {
+                        let name_c = CString::new(raw.name.clone()).ok();
+                        if let Some(name_c) = name_c {
+                            match hokori_sys::platform::stat_entry(fd, &name_c) {
+                                Ok(meta) => (
+                                    Some(meta.size),
+                                    Some(meta.alloc_size),
+                                    meta.ino,
+                                    meta.dev,
+                                    Some(meta.nlink),
+                                ),
+                                Err(_) => (None, None, raw.ino, current_dev, None),
+                            }
+                        } else {
+                            (None, None, raw.ino, current_dev, None)
+                        }
+                    };
+
                     let entry = DirEntry::from_parts(
                         entry_path,
                         next_depth,
                         raw.file_type,
-                        raw.ino,
-                        raw.size,
-                        current_dev,
-                        None,
+                        ino,
+                        apparent,
+                        disk,
+                        dev,
+                        nlink,
                     );
                     if sender.send(Ok(entry)).is_err() {
                         cancel.store(true, Ordering::Relaxed);
