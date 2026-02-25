@@ -114,7 +114,9 @@ impl Scanner {
             };
 
             let mut aggregator = aggregator::StreamingAggregator::new();
-            let mut tree_builder = config.build_tree.then(TreeBuilder::new);
+            let mut tree_builder = config
+                .build_tree
+                .then(|| TreeBuilder::with_capacity(4_000_000));
             let mut progress = progress::ProgressTracker::new(progress_tx);
             let mut errors: Vec<WalkError> = Vec::new();
             let walk_start = std::time::Instant::now();
