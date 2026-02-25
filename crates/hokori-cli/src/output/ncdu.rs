@@ -1,60 +1,41 @@
 use hokori_scan::ScanResult;
-use hokori_scan::tree::TreeNode;
-use serde_json::{Map, Value, json};
+use std::io::{BufWriter, Write};
 
 pub fn render(result: &ScanResult, roots: &[std::path::PathBuf]) {
+    let stdout = std::io::stdout();
+    let mut w = BufWriter::with_capacity(64 * 1024, stdout.lock());
+
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
 
-    let mut output = vec![
-        json!(1),
-        json!(2),
-        json!({
-            "progname": "hokori",
-            "progver": env!("CARGO_PKG_VERSION"),
-            "timestamp": timestamp,
-        }),
-    ];
+    write!(
+        w,
+        "[1,2,{{\"progname\":\"hokori\",\"progver\":\"{}\",\"timestamp\":{}}}",
+        env!("CARGO_PKG_VERSION"),
+        timestamp
+    )
+    .unwrap();
 
-    if let Some(tree) = &result.tree {
-        for root_node in tree {
-            output.push(node_to_value(root_node));
+    if let Some(ref tree) = result.tree {
+        for &root_idx in &tree.root_indices {
+            write!(w, ",").unwrap();
+            tree.write_ncdu_node(&mut w, root_idx).unwrap();
         }
     } else {
         for root in roots {
-            output.push(Value::Array(vec![node_info(
-                &root.display().to_string(),
-                result.total_size,
-                result.total_size,
-            )]));
+            let name = serde_json::to_string(&root.display().to_string()).unwrap();
+            write!(
+                w,
+                ",[{{\"name\":{},\"asize\":{},\"dsize\":{}}}]",
+                name, result.total_size, result.total_size
+            )
+            .unwrap();
         }
         eprintln!("note: full ncdu tree export requires --build-tree");
     }
 
-    println!("{}", serde_json::to_string(&Value::Array(output)).unwrap());
-}
-
-fn node_to_value(node: &TreeNode) -> Value {
-    let name = String::from_utf8_lossy(&node.name).into_owned();
-    let info = node_info(&name, node.apparent_size, node.disk_usage);
-
-    if node.is_dir {
-        let mut items = vec![info];
-        for child in &node.children {
-            items.push(node_to_value(child));
-        }
-        Value::Array(items)
-    } else {
-        info
-    }
-}
-
-fn node_info(name: &str, apparent_size: u64, disk_usage: u64) -> Value {
-    let mut info = Map::new();
-    info.insert("name".to_string(), Value::String(name.to_string()));
-    info.insert("asize".to_string(), Value::Number(apparent_size.into()));
-    info.insert("dsize".to_string(), Value::Number(disk_usage.into()));
-    Value::Object(info)
+    writeln!(w, "]").unwrap();
+    w.flush().unwrap();
 }
