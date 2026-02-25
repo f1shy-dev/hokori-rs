@@ -3,7 +3,13 @@ name = "hokori-walker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Ultra-fast parallel directory walker"
+description = "Ultra-fast parallel directory walker with work-stealing"
 
 [dependencies]
 hokori-sys.workspace = true
+crossbeam-deque = "0.8"
+crossbeam-channel = "0.5"
+crossbeam-utils = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
