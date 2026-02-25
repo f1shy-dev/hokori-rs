@@ -102,6 +102,9 @@ pub fn read_dir_raw(
             file_type,
             ino: metadata.as_ref().map(|m| m.ino()).unwrap_or(0),
             size: metadata.as_ref().map(|m| m.len()),
+            alloc_size: None,
+            dev: None,
+            nlink: None,
         });
     }
 
