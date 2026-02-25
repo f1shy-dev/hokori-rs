@@ -165,6 +165,7 @@ fn build_subtree(
 fn parent_path(path: &[u8]) -> Option<Vec<u8>> {
     path.iter()
         .rposition(|&b| b == b'/')
+        .filter(|&pos| pos > 0)
         .map(|pos| path[..pos].to_vec())
 }
 
