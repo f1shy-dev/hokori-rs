@@ -63,3 +63,7 @@ pub use macos as platform;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub use fallback as platform;
+
+#[cfg(test)]
+#[path = "fallback/mod.rs"]
+pub mod fallback_test;
