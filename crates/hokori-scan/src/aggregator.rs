@@ -1,3 +1,5 @@
+use crate::tree::TreeNode;
+
 #[derive(Debug, Clone, Default)]
 pub struct DirStats {
     pub direct_size: u64,
@@ -15,6 +17,7 @@ pub struct ScanResult {
     pub deduped_count: u64,
     pub skipped_count: u64,
     pub roots: Vec<RootResult>,
+    pub tree: Option<Vec<TreeNode>>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +38,7 @@ impl Default for ScanResult {
             deduped_count: 0,
             skipped_count: 0,
             roots: vec![],
+            tree: None,
         }
     }
 }
@@ -73,6 +77,10 @@ impl StreamingAggregator {
 
     pub fn add_root_result(&mut self, root: RootResult) {
         self.result.roots.push(root);
+    }
+
+    pub fn set_tree(&mut self, tree: Option<Vec<TreeNode>>) {
+        self.result.tree = tree;
     }
 
     pub fn finish(self) -> ScanResult {

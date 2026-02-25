@@ -1,10 +1,12 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::Receiver;
 use hokori_walker::error::WalkErrorKind;
 use hokori_walker::{WalkConfig, WalkError, Walker};
+
+use crate::tree::TreeBuilder;
 
 pub mod aggregator;
 pub mod dedup;
@@ -105,6 +107,7 @@ impl Scanner {
             };
 
             let mut aggregator = aggregator::StreamingAggregator::new();
+            let mut tree_builder = config.build_tree.then(TreeBuilder::new);
             let mut progress = progress::ProgressTracker::new(progress_tx);
             let mut errors: Vec<WalkError> = Vec::new();
 
@@ -123,9 +126,16 @@ impl Scanner {
                             .iter()
                             .position(|root| entry_path.starts_with(&root.path));
 
-                        let mut size = match config.size_mode {
-                            SizeMode::DiskUsage | SizeMode::ApparentSize => entry.size.unwrap_or(0),
+                        let size = match config.size_mode {
+                            SizeMode::DiskUsage => {
+                                entry.disk_usage.or(entry.apparent_size).unwrap_or(0)
+                            }
+                            SizeMode::ApparentSize => {
+                                entry.apparent_size.or(entry.disk_usage).unwrap_or(0)
+                            }
                         };
+                        let size_apparent = entry.apparent_size.unwrap_or(0);
+                        let size_disk = entry.disk_usage.unwrap_or(0);
 
                         if entry.is_file() {
                             if let Some(ref dedup) = dedup_filter {
@@ -135,14 +145,18 @@ impl Scanner {
                                 }
                             }
 
-                            if entry.size.is_none() {
-                                if let Ok(meta) = std::fs::metadata(&entry_path) {
-                                    size = meta.len();
-                                }
-                            }
-
                             aggregator.add_entry(size, false);
                             progress.record_file(size);
+
+                            if let Some(ref mut builder) = tree_builder {
+                                builder.insert(
+                                    entry.path_bytes(),
+                                    size_apparent,
+                                    size_disk,
+                                    false,
+                                    entry.depth,
+                                );
+                            }
 
                             if let Some(idx) = root_idx {
                                 root_results[idx].total_size += size;
@@ -151,6 +165,16 @@ impl Scanner {
                         } else if entry.is_dir() {
                             aggregator.add_entry(0, true);
                             progress.record_dir();
+
+                            if let Some(ref mut builder) = tree_builder {
+                                builder.insert(
+                                    entry.path_bytes(),
+                                    size_apparent,
+                                    size_disk,
+                                    true,
+                                    entry.depth,
+                                );
+                            }
 
                             if let Some(idx) = root_idx {
                                 root_results[idx].dir_count += 1;
@@ -170,6 +194,9 @@ impl Scanner {
             progress.finish();
             for root in root_results {
                 aggregator.add_root_result(root);
+            }
+            if let Some(builder) = tree_builder {
+                aggregator.set_tree(Some(builder.build(&config.roots)));
             }
             let result = aggregator.finish();
             let _ = result_tx.send((result, errors));

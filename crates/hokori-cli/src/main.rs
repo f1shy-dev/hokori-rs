@@ -43,6 +43,13 @@ pub(crate) struct Cli {
 
     #[arg(long)]
     stats: bool,
+
+    #[arg(long)]
+    build_tree: bool,
+
+    /// Show top N largest directories
+    #[arg(long, value_name = "N")]
+    top: Option<usize>,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -54,6 +61,9 @@ enum OutputFormat {
 
 fn main() {
     let cli = Cli::parse();
+
+    let build_tree =
+        cli.build_tree || matches!(cli.format, OutputFormat::Ncdu) || cli.top.is_some();
 
     let config = hokori_scan::ScanConfig {
         roots: cli.paths.clone(),
@@ -67,7 +77,7 @@ fn main() {
         follow_symlinks: cli.follow_links,
         same_filesystem: cli.one_file_system,
         max_depth: cli.max_depth,
-        build_tree: matches!(cli.format, OutputFormat::Ncdu),
+        build_tree,
     };
 
     let scanner = hokori_scan::Scanner::new(config);
@@ -78,9 +88,7 @@ fn main() {
         Some(progress::spawn_progress_bar(handle.progress.clone()))
     } else {
         let progress_rx = handle.progress.clone();
-        Some(std::thread::spawn(move || {
-            for _ in progress_rx {}
-        }))
+        Some(std::thread::spawn(move || for _ in progress_rx {}))
     };
 
     let start = std::time::Instant::now();
@@ -117,7 +125,10 @@ fn main() {
         } else {
             0.0
         };
-        eprintln!("  bandwidth:  {}/s", human_bytes::human_bytes(bytes_per_sec));
+        eprintln!(
+            "  bandwidth:  {}/s",
+            human_bytes::human_bytes(bytes_per_sec)
+        );
     }
 
     if !errors.is_empty() {
