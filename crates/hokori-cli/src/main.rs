@@ -102,7 +102,6 @@ fn main() {
     };
 
     let (result, errors) = handle.wait();
-    let elapsed = result.walk_time + result.tree_build_time;
 
     if let Some(t) = progress_thread {
         let _ = t.join();
@@ -115,6 +114,8 @@ fn main() {
         OutputFormat::Ncdu => output::ncdu::render(&result, &cli.paths),
     }
     let render_elapsed = render_start.elapsed();
+    let total_with_output = result.walk_time + result.tree_build_time + render_elapsed;
+    let elapsed = total_with_output;
 
     if cli.timings {
         eprintln!();
