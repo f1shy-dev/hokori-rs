@@ -110,6 +110,7 @@ impl Scanner {
             let mut tree_builder = config.build_tree.then(TreeBuilder::new);
             let mut progress = progress::ProgressTracker::new(progress_tx);
             let mut errors: Vec<WalkError> = Vec::new();
+            let walk_start = std::time::Instant::now();
 
             for result in entry_rx {
                 if cancel_clone.load(Ordering::Relaxed) {
@@ -191,13 +192,17 @@ impl Scanner {
                 }
             }
 
+            let walk_time = walk_start.elapsed();
             progress.finish();
             for root in root_results {
                 aggregator.add_root_result(root);
             }
+            let tree_start = std::time::Instant::now();
             if let Some(builder) = tree_builder {
                 aggregator.set_tree(Some(builder.build(&config.roots)));
             }
+            let tree_build_time = tree_start.elapsed();
+            aggregator.set_timings(walk_time, tree_build_time);
             let result = aggregator.finish();
             let _ = result_tx.send((result, errors));
         });

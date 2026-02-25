@@ -1,3 +1,7 @@
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 use clap::Parser;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -45,6 +49,9 @@ pub(crate) struct Cli {
     stats: bool,
 
     #[arg(long)]
+    timings: bool,
+
+    #[arg(long)]
     build_tree: bool,
 
     /// Show top N largest directories
@@ -60,6 +67,9 @@ enum OutputFormat {
 }
 
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let cli = Cli::parse();
 
     let build_tree =
@@ -91,18 +101,31 @@ fn main() {
         Some(std::thread::spawn(move || for _ in progress_rx {}))
     };
 
-    let start = std::time::Instant::now();
     let (result, errors) = handle.wait();
-    let elapsed = start.elapsed();
+    let elapsed = result.walk_time + result.tree_build_time;
 
     if let Some(t) = progress_thread {
         let _ = t.join();
     }
 
+    let render_start = std::time::Instant::now();
     match cli.format {
         OutputFormat::Human => output::human::render(&result, &errors, &cli),
         OutputFormat::Json => output::json::render(&result, &errors),
         OutputFormat::Ncdu => output::ncdu::render(&result, &cli.paths),
+    }
+    let render_elapsed = render_start.elapsed();
+
+    if cli.timings {
+        eprintln!();
+        eprintln!("--- phase timings ---");
+        eprintln!("  walk:        {:.3}s", result.walk_time.as_secs_f64());
+        eprintln!("  tree build:  {:.3}s", result.tree_build_time.as_secs_f64());
+        eprintln!("  output:      {:.3}s", render_elapsed.as_secs_f64());
+        eprintln!(
+            "  total:       {:.3}s",
+            (result.walk_time + result.tree_build_time + render_elapsed).as_secs_f64()
+        );
     }
 
     if cli.stats {

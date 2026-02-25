@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::tree::BuiltTree;
 
 #[derive(Debug, Clone, Default)]
@@ -16,6 +18,8 @@ pub struct ScanResult {
     pub error_count: u64,
     pub deduped_count: u64,
     pub skipped_count: u64,
+    pub walk_time: Duration,
+    pub tree_build_time: Duration,
     pub roots: Vec<RootResult>,
     pub tree: Option<BuiltTree>,
 }
@@ -37,6 +41,8 @@ impl Default for ScanResult {
             error_count: 0,
             deduped_count: 0,
             skipped_count: 0,
+            walk_time: Duration::ZERO,
+            tree_build_time: Duration::ZERO,
             roots: vec![],
             tree: None,
         }
@@ -81,6 +87,11 @@ impl StreamingAggregator {
 
     pub fn set_tree(&mut self, tree: Option<BuiltTree>) {
         self.result.tree = tree;
+    }
+
+    pub fn set_timings(&mut self, walk_time: Duration, tree_build_time: Duration) {
+        self.result.walk_time = walk_time;
+        self.result.tree_build_time = tree_build_time;
     }
 
     pub fn finish(self) -> ScanResult {
