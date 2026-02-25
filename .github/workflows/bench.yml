@@ -34,6 +34,7 @@ jobs:
             output=$(cargo run --release -p hokori-cli -- --stats -q /tmp/hokori-bench-tree 2>&1)
             throughput=$(echo "$output" | grep "throughput:" | awk '{print $2}')
             throughput_int=${throughput%.*}
+            throughput_int=${throughput_int:-0}
             if [ "$throughput_int" -gt "$best_throughput" ]; then
               best_throughput=$throughput_int
             fi
