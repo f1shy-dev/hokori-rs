@@ -1,3 +1,5 @@
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +98,11 @@ impl Scanner {
                     dir_count: 0,
                 })
                 .collect();
+            let root_path_bytes: Vec<Vec<u8>> = config
+                .roots
+                .iter()
+                .map(|path| path.as_os_str().as_bytes().to_vec())
+                .collect();
 
             let walker = Walker::new(walk_config);
             let (entry_rx, walk_handle) = walker.walk();
@@ -119,12 +126,16 @@ impl Scanner {
 
                 match result {
                     Ok(entry) => {
-                        let entry_path = entry.path();
-                        progress.set_current_path(entry_path.display().to_string());
+                        if progress.should_update() {
+                            let path = OsStr::from_bytes(entry.path_bytes())
+                                .to_string_lossy()
+                                .into_owned();
+                            progress.set_current_path(path);
+                        }
 
-                        let root_idx = root_results
+                        let root_idx = root_path_bytes
                             .iter()
-                            .position(|root| entry_path.starts_with(&root.path));
+                            .position(|root| path_has_prefix(entry.path_bytes(), root));
 
                         let size = match config.size_mode {
                             SizeMode::DiskUsage => {
@@ -220,6 +231,30 @@ pub struct ScanHandle {
     cancel: Arc<AtomicBool>,
 }
 
+fn path_has_prefix(path: &[u8], root: &[u8]) -> bool {
+    if root.is_empty() {
+        return true;
+    }
+
+    if root == b"/" {
+        return path.starts_with(root);
+    }
+
+    if path == root {
+        return true;
+    }
+
+    if !path.starts_with(root) {
+        return false;
+    }
+
+    if root.last() == Some(&b'/') {
+        true
+    } else {
+        path.get(root.len()) == Some(&b'/')
+    }
+}
+
 impl ScanHandle {
     pub fn wait(self) -> (ScanResult, Vec<WalkError>) {
         match self.result_rx.recv() {
@@ -291,5 +326,13 @@ mod tests {
         let count = rx.try_iter().count();
         assert!(count < 200, "Progress should be throttled, got {count}");
         assert!(count > 0, "Should have at least one progress update");
+    }
+
+    #[test]
+    fn test_path_has_prefix_component_boundary() {
+        assert!(path_has_prefix(b"/tmp/root/file", b"/tmp/root"));
+        assert!(path_has_prefix(b"./a/b", b"."));
+        assert!(!path_has_prefix(b"/tmp/root2/file", b"/tmp/root"));
+        assert!(!path_has_prefix(b"./abc", b"./a"));
     }
 }

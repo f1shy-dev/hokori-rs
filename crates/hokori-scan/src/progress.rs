@@ -58,6 +58,11 @@ impl ProgressTracker {
         self.current_path = Some(path);
     }
 
+    pub fn should_update(&self) -> bool {
+        Instant::now().duration_since(self.last_update).as_millis() as u64
+            >= self.update_interval_ms
+    }
+
     fn maybe_send_update(&mut self) {
         let now = Instant::now();
         if now.duration_since(self.last_update).as_millis() as u64 >= self.update_interval_ms {
@@ -66,7 +71,7 @@ impl ProgressTracker {
                 dirs_scanned: self.dirs,
                 bytes_scanned: self.bytes,
                 errors: self.errors,
-                current_path: self.current_path.clone(),
+                current_path: self.current_path.take(),
                 elapsed_secs: now.duration_since(self.start).as_secs_f64(),
             });
             self.last_update = now;

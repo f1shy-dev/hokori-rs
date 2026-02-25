@@ -179,9 +179,15 @@ fn parse_bulk_buffer(buf: &[u8], count: usize, callback: &mut dyn FnMut(RawDirEn
 
         let kind = obj_type.map_or(FileType::Unknown, obj_type_to_file_type);
         let ino = file_id.unwrap_or(0);
-        let size = if kind == FileType::File { alloc_size } else { None };
+        let size = if kind == FileType::File {
+            alloc_size
+        } else {
+            None
+        };
 
         callback(RawDirEntry {
+            // PERF: RawDirEntry keeps owning `Vec<u8>` names to avoid threading short-lived
+            // borrowed lifetimes through public callback APIs across crates.
             name: name.to_vec(),
             file_type: kind,
             ino,
