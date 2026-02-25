@@ -11,6 +11,9 @@ pub struct RawDirEntry {
     pub file_type: FileType,
     pub ino: u64,
     pub size: Option<u64>,
+    pub alloc_size: Option<u64>,
+    pub dev: Option<u64>,
+    pub nlink: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

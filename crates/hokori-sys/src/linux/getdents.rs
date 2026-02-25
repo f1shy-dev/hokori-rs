@@ -10,8 +10,15 @@ struct LinuxDirent64 {
     d_type: u8,
 }
 
+// PERF: 256KB balances syscall count vs per-thread memory. At 32 threads this is 8MB total.
+// Smaller (128KB) would halve memory but roughly double syscalls for large directories.
+// Larger (512KB) shows diminishing returns since most directories fit in one 256KB read.
+// For spinning disks, smaller may be better (less wasted prefetch); for NVMe, 256KB is fine.
 pub const GETDENTS_BUF_SIZE: usize = 256 * 1024;
 
+// PERF: getdents64 returns d_type inline, so we avoid a stat call for files/dirs/symlinks.
+// Only DT_UNKNOWN entries (rare on ext4/btrfs/xfs, common on some network filesystems)
+// require a fallback stat_entry call in the walker.
 const DT_UNKNOWN: u8 = 0;
 const DT_DIR: u8 = 4;
 const DT_REG: u8 = 8;
@@ -64,6 +71,9 @@ pub fn parse_getdents_buf(buf: &[u8], n: usize, callback: &mut dyn FnMut(RawDirE
                 file_type: d_type_to_file_type(d_type),
                 ino: d_ino,
                 size: None,
+                alloc_size: None,
+                dev: None,
+                nlink: None,
             });
         }
         off += d_reclen;

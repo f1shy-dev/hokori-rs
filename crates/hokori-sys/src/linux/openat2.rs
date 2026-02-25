@@ -7,6 +7,12 @@ struct OpenHow {
     resolve: u64,
 }
 
+// PERF: RESOLVE_BENEATH is only active when parent_fd is Some, which prevents
+// path traversal escaping the parent directory. Currently the walker always passes
+// parent_fd=None (absolute paths), so RESOLVE_BENEATH is never used. Switching to
+// relative openat2(parent_fd, child_name) would enable RESOLVE_BENEATH for symlink
+// safety and save path string construction, but requires tracking parent fds across
+// work-stealing boundaries, complicating the design for marginal gain.
 const RESOLVE_BENEATH: u64 = 0x08;
 
 pub fn open_dir(parent_fd: Option<i32>, path: &std::ffi::CStr) -> Result<i32, SysError> {

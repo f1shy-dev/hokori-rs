@@ -4,6 +4,9 @@ use std::mem::size_of;
 pub const BULK_BUF_SIZE: usize = 128 * 1024;
 
 const ATTR_CMN_ERROR: u32 = 0x20000000;
+const ATTR_CMN_DEVID: u32 = 0x00000002;
+const ATTR_FILE_LINKCOUNT: u32 = 0x00000001;
+const ATTR_FILE_DATALENGTH: u32 = 0x00000200;
 const VREG: u32 = 1;
 const VDIR: u32 = 2;
 const VLNK: u32 = 5;
@@ -34,12 +37,13 @@ pub fn read_dir_raw(
         reserved: 0,
         commonattr: libc::ATTR_CMN_RETURNED_ATTRS
             | libc::ATTR_CMN_NAME
+            | ATTR_CMN_DEVID
             | ATTR_CMN_ERROR
             | libc::ATTR_CMN_OBJTYPE
             | libc::ATTR_CMN_FILEID,
         volattr: 0,
         dirattr: 0,
-        fileattr: libc::ATTR_FILE_ALLOCSIZE,
+        fileattr: ATTR_FILE_LINKCOUNT | libc::ATTR_FILE_ALLOCSIZE | ATTR_FILE_DATALENGTH,
         forkattr: 0,
     };
 
@@ -90,10 +94,19 @@ fn parse_bulk_buffer(buf: &[u8], count: usize, callback: &mut dyn FnMut(RawDirEn
 
         let mut field_pos = 24usize;
         let mut name_ref: Option<AttrReference> = None;
+        let mut dev_id: Option<u64> = None;
         let mut error_code: Option<u32> = None;
         let mut obj_type: Option<u32> = None;
         let mut file_id: Option<u64> = None;
+        let mut link_count: Option<u32> = None;
         let mut alloc_size: Option<u64> = None;
+        let mut data_length: Option<u64> = None;
+
+        // PERF: Attribute parsing order must follow the macOS canonical order.
+        // For getattrlistbulk, per-entry layout is:
+        //   [length][returned_attrs][error?][common attrs in bit order][file attrs in bit order]
+        // ATTR_CMN_ERROR is special: only present in returned bitmap when there IS an error,
+        // so for successful entries it's absent and the non-error attrs pack contiguously.
 
         if (commonattr & libc::ATTR_CMN_NAME) != 0 {
             if field_pos + size_of::<AttrReference>() <= entry.len() {
@@ -101,6 +114,15 @@ fn parse_bulk_buffer(buf: &[u8], count: usize, callback: &mut dyn FnMut(RawDirEn
                 name_ref = Some(unsafe { ptr.read_unaligned() });
             }
             field_pos += size_of::<AttrReference>();
+        }
+
+        if (commonattr & ATTR_CMN_DEVID) != 0 {
+            if field_pos + 4 <= entry.len() {
+                dev_id = Some(i32::from_ne_bytes(
+                    entry[field_pos..field_pos + 4].try_into().unwrap(),
+                ) as u64);
+            }
+            field_pos += 4;
         }
 
         if (commonattr & ATTR_CMN_ERROR) != 0 {
@@ -130,12 +152,32 @@ fn parse_bulk_buffer(buf: &[u8], count: usize, callback: &mut dyn FnMut(RawDirEn
             field_pos += 8;
         }
 
+        // File attributes in canonical order: LINKCOUNT, ALLOCSIZE, DATALENGTH
+        if (fileattr & ATTR_FILE_LINKCOUNT) != 0 {
+            if field_pos + 4 <= entry.len() {
+                link_count = Some(u32::from_ne_bytes(
+                    entry[field_pos..field_pos + 4].try_into().unwrap(),
+                ));
+            }
+            field_pos += 4;
+        }
+
         if (fileattr & libc::ATTR_FILE_ALLOCSIZE) != 0 {
             if field_pos + 8 <= entry.len() {
                 alloc_size = Some(u64::from_ne_bytes(
                     entry[field_pos..field_pos + 8].try_into().unwrap(),
                 ));
             }
+            field_pos += 8;
+        }
+
+        if (fileattr & ATTR_FILE_DATALENGTH) != 0 {
+            if field_pos + 8 <= entry.len() {
+                data_length = Some(u64::from_ne_bytes(
+                    entry[field_pos..field_pos + 8].try_into().unwrap(),
+                ));
+            }
+            // field_pos not needed after last field
         }
 
         if let Some(code) = error_code {
@@ -179,11 +221,6 @@ fn parse_bulk_buffer(buf: &[u8], count: usize, callback: &mut dyn FnMut(RawDirEn
 
         let kind = obj_type.map_or(FileType::Unknown, obj_type_to_file_type);
         let ino = file_id.unwrap_or(0);
-        let size = if kind == FileType::File {
-            alloc_size
-        } else {
-            None
-        };
 
         callback(RawDirEntry {
             // PERF: RawDirEntry keeps owning `Vec<u8>` names to avoid threading short-lived
@@ -191,7 +228,10 @@ fn parse_bulk_buffer(buf: &[u8], count: usize, callback: &mut dyn FnMut(RawDirEn
             name: name.to_vec(),
             file_type: kind,
             ino,
-            size,
+            size: if kind == FileType::File { data_length } else { None },
+            alloc_size: if kind == FileType::File { alloc_size } else { None },
+            dev: dev_id,
+            nlink: link_count,
         });
 
         pos += entry_len;

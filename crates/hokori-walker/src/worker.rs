@@ -34,6 +34,10 @@ struct WalkerWorker {
 
 impl WalkerWorker {
     fn run(&mut self) {
+        const BACKOFF_MIN_US: u64 = 50;
+        const BACKOFF_MAX_US: u64 = 1000;
+        let mut backoff_us = BACKOFF_MIN_US;
+
         loop {
             if self.cancel.load(Ordering::Relaxed) {
                 break;
@@ -41,6 +45,7 @@ impl WalkerWorker {
 
             match self.find_work() {
                 Some(item) => {
+                    backoff_us = BACKOFF_MIN_US;
                     self.process_directory(item);
                     self.pending_dirs.fetch_sub(1, Ordering::AcqRel);
                 }
@@ -48,12 +53,20 @@ impl WalkerWorker {
                     if self.pending_dirs.load(Ordering::Acquire) == 0 {
                         break;
                     }
-                    std::thread::sleep(std::time::Duration::from_micros(50));
+                    std::thread::sleep(std::time::Duration::from_micros(backoff_us));
+                    backoff_us = (backoff_us * 2).min(BACKOFF_MAX_US);
                 }
             }
         }
     }
 
+    // PERF: 3-tier work discovery: local pop (LIFO, DFS order for cache locality),
+    // then injector steal (global rebalancing), then steal from peers.
+    // LIFO local gives DFS traversal which keeps the dcache warm for deep subtrees.
+    // The trade-off is potential load imbalance if one subtree is much larger, but
+    // the injector + peer stealing compensates. A FIFO local queue would give BFS
+    // (better load balance, worse cache locality) — DFS is the right choice for
+    // filesystem traversal where each directory's children share parent dcache entries.
     fn find_work(&self) -> Option<WorkItem> {
         if let Some(item) = self.local.pop() {
             return Some(item);
@@ -155,9 +168,9 @@ impl WalkerWorker {
                             FileType::Directory,
                             raw.ino,
                             raw.size,
-                            raw.size,
-                            current_dev,
-                            None,
+                            raw.alloc_size.or(raw.size),
+                            raw.dev.unwrap_or(current_dev),
+                            raw.nlink,
                         );
                         if sender.send(Ok(entry)).is_err() {
                             cancel.store(true, Ordering::Relaxed);
@@ -230,9 +243,9 @@ impl WalkerWorker {
                             FileType::Symlink,
                             raw.ino,
                             raw.size,
-                            raw.size,
-                            current_dev,
-                            None,
+                            raw.alloc_size.or(raw.size),
+                            raw.dev.unwrap_or(current_dev),
+                            raw.nlink,
                         );
                         if sender.send(Ok(entry)).is_err() {
                             cancel.store(true, Ordering::Relaxed);
@@ -249,21 +262,33 @@ impl WalkerWorker {
                         }
                     }
                     _ => {
-                        let (apparent, disk, ino, dev, nlink) =
-                            if let Some(name_c) = name_to_cstr(&raw.name, &mut name_c_buf) {
-                                match hokori_sys::platform::stat_entry(fd, name_c) {
-                                    Ok(meta) => (
-                                        Some(meta.size),
-                                        Some(meta.alloc_size),
-                                        meta.ino,
-                                        meta.dev,
-                                        Some(meta.nlink),
-                                    ),
-                                    Err(_) => (raw.size, raw.size, raw.ino, current_dev, None),
+                        let has_bulk_meta =
+                            raw.size.is_some() && raw.alloc_size.is_some() && raw.dev.is_some();
+
+                        let (apparent, disk, ino, dev, nlink) = if has_bulk_meta {
+                            (
+                                raw.size,
+                                raw.alloc_size,
+                                raw.ino,
+                                raw.dev.unwrap_or(current_dev),
+                                raw.nlink,
+                            )
+                        } else if let Some(name_c) = name_to_cstr(&raw.name, &mut name_c_buf) {
+                            match hokori_sys::platform::stat_entry(fd, name_c) {
+                                Ok(meta) => (
+                                    Some(meta.size),
+                                    Some(meta.alloc_size),
+                                    meta.ino,
+                                    meta.dev,
+                                    Some(meta.nlink),
+                                ),
+                                Err(_) => {
+                                    (raw.size, raw.alloc_size.or(raw.size), raw.ino, current_dev, None)
                                 }
-                            } else {
-                                (raw.size, raw.size, raw.ino, current_dev, None)
-                            };
+                            }
+                        } else {
+                            (raw.size, raw.alloc_size.or(raw.size), raw.ino, current_dev, None)
+                        };
 
                         let entry = DirEntry::from_parts(
                             entry_path_buf.clone(),

@@ -1,6 +1,12 @@
 use crate::{EntryMetadata, FileType, SysError};
 use libc::{SYS_statx, c_long, syscall};
 
+// PERF: AT_STATX_DONT_SYNC avoids triggering network filesystem stat flushes.
+// We request STATX_BLOCKS for disk usage calculation (blocks * 512 = allocated bytes).
+// STATX_BLOCKS could be omitted if only apparent size is needed, but the walker always
+// provides both apparent (stx_size) and disk (stx_blocks*512) to let the scanner choose.
+// Removing STATX_BLOCKS would save a few cycles on some filesystems where block counts
+// are stored separately, but the savings are negligible on ext4/btrfs/xfs.
 const AT_STATX_DONT_SYNC: i32 = 0x2000;
 
 fn statx_mode_to_file_type(mode: u16) -> FileType {
@@ -20,6 +26,10 @@ pub fn statx_entry(dir_fd: i32, name: &std::ffi::CStr) -> Result<EntryMetadata, 
         | libc::STATX_BLOCKS
         | libc::STATX_INO
         | libc::STATX_NLINK;
+    // PERF: statx is called per-file within a directory. Since all files in a directory
+    // share the same parent inode, the kernel's dcache and icache are warm — sequential
+    // statx calls for siblings are nearly as fast as a hypothetical batched syscall.
+    // Linux has no batch-statx interface (io_uring IORING_OP_STATX is single-op too).
     let rc = unsafe {
         syscall(
             SYS_statx as c_long,
