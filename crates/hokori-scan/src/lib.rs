@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crossbeam_channel::Receiver;
+use hokori_walker::error::WalkErrorKind;
 use hokori_walker::{WalkConfig, WalkError, Walker};
 
 pub mod aggregator;
@@ -194,7 +195,23 @@ pub struct ScanHandle {
 
 impl ScanHandle {
     pub fn wait(self) -> (ScanResult, Vec<WalkError>) {
-        self.result_rx.recv().unwrap_or_default()
+        match self.result_rx.recv() {
+            Ok(result) => result,
+            Err(_) => {
+                let mut result = ScanResult::default();
+                result.error_count = 1;
+                (
+                    result,
+                    vec![WalkError {
+                        path: None,
+                        depth: 0,
+                        kind: WalkErrorKind::Io(std::io::Error::other(
+                            "scan thread terminated unexpectedly",
+                        )),
+                    }],
+                )
+            }
+        }
     }
 
     pub fn cancel(&self) {

@@ -13,9 +13,10 @@ pub fn render(result: &ScanResult, roots: &[std::path::PathBuf]) {
     );
 
     for root in roots {
+        let name = serde_json::to_string(&root.display().to_string()).unwrap();
         print!(
-            ",[{{\"name\":\"{}\",\"asize\":{},\"dsize\":{}}}]",
-            root.display(),
+            ",[{{\"name\":{},\"asize\":{},\"dsize\":{}}}]",
+            name,
             result.total_size,
             result.total_size,
         );
