@@ -115,11 +115,12 @@ impl Scanner {
 
                 match result {
                     Ok(entry) => {
-                        progress.set_current_path(entry.path.display().to_string());
+                        let entry_path = entry.path();
+                        progress.set_current_path(entry_path.display().to_string());
 
                         let root_idx = root_results
                             .iter()
-                            .position(|root| entry.path.starts_with(&root.path));
+                            .position(|root| entry_path.starts_with(&root.path));
 
                         let size = match config.size_mode {
                             SizeMode::DiskUsage | SizeMode::ApparentSize => entry.size.unwrap_or(0),

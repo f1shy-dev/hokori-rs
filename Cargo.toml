@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/hokori-sys",
+  "crates/hokori-walker",
+  "crates/hokori-scan",
+  "crates/hokori-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+hokori-sys = { path = "crates/hokori-sys" }
+hokori-walker = { path = "crates/hokori-walker" }
+hokori-scan = { path = "crates/hokori-scan" }
