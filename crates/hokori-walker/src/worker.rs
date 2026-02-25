@@ -128,163 +128,159 @@ impl WalkerWorker {
 
         let sender = self.sender.clone();
         let cancel = self.cancel.clone();
-        let base_path = item.path.clone();
         let follow_symlinks = self.follow_symlinks;
-        let mut enqueue = |name: &[u8], parent_path: &[u8]| {
-            if !allow_descend {
-                return;
-            }
-            let mut child_path = parent_path.to_vec();
-            if !child_path.is_empty() && child_path.last() != Some(&b'/') {
-                child_path.push(b'/');
-            }
-            child_path.extend_from_slice(name);
-            child_dirs.push(child_path);
-        };
 
-        let result = hokori_sys::platform::read_dir_raw(fd, &mut self.buf, &mut |raw: RawDirEntry| {
-            if cancel.load(Ordering::Relaxed) {
-                return;
-            }
+        let mut entry_path_buf = Vec::with_capacity(item.path.len().saturating_add(256));
+        entry_path_buf.extend_from_slice(&item.path);
+        if !entry_path_buf.is_empty() && entry_path_buf.last() != Some(&b'/') {
+            entry_path_buf.push(b'/');
+        }
+        let entry_prefix_len = entry_path_buf.len();
+        let mut name_c_buf = Vec::new();
 
-            let mut entry_path = base_path.clone();
-            if !entry_path.is_empty() && entry_path.last() != Some(&b'/') {
-                entry_path.push(b'/');
-            }
-            entry_path.extend_from_slice(&raw.name);
-
-            match raw.file_type {
-                FileType::Directory => {
-                    let entry = DirEntry::from_parts(
-                        entry_path,
-                        next_depth,
-                        FileType::Directory,
-                        raw.ino,
-                        raw.size,
-                        raw.size,
-                        current_dev,
-                        None,
-                    );
-                    if sender.send(Ok(entry)).is_err() {
-                        cancel.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    enqueue(&raw.name, &base_path);
+        let result =
+            hokori_sys::platform::read_dir_raw(fd, &mut self.buf, &mut |raw: RawDirEntry| {
+                if cancel.load(Ordering::Relaxed) {
+                    return;
                 }
-                FileType::Unknown => {
-                    let name_c = CString::new(raw.name.clone()).ok();
-                    if let Some(name_c) = name_c {
-                        match hokori_sys::platform::stat_entry(fd, &name_c) {
-                            Ok(meta) => {
-                                let entry = DirEntry::from_parts(
-                                    entry_path,
-                                    next_depth,
-                                    meta.file_type,
-                                    meta.ino,
-                                    Some(meta.size),
-                                    Some(meta.alloc_size),
-                                    meta.dev,
-                                    Some(meta.nlink),
-                                );
-                                if sender.send(Ok(entry)).is_err() {
-                                    cancel.store(true, Ordering::Relaxed);
-                                    return;
-                                }
-                                if meta.file_type == FileType::Directory {
-                                    enqueue(&raw.name, &base_path);
-                                }
-                            }
-                            Err(_) => {
-                                let entry = DirEntry::from_parts(
-                                    entry_path,
-                                    next_depth,
-                                    FileType::Unknown,
-                                    raw.ino,
-                                    None,
-                                    None,
-                                    current_dev,
-                                    None,
-                                );
-                                if sender.send(Ok(entry)).is_err() {
-                                    cancel.store(true, Ordering::Relaxed);
-                                }
-                            }
+
+                entry_path_buf.truncate(entry_prefix_len);
+                entry_path_buf.extend_from_slice(&raw.name);
+
+                match raw.file_type {
+                    FileType::Directory => {
+                        let entry = DirEntry::from_parts(
+                            entry_path_buf.clone(),
+                            next_depth,
+                            FileType::Directory,
+                            raw.ino,
+                            raw.size,
+                            raw.size,
+                            current_dev,
+                            None,
+                        );
+                        if sender.send(Ok(entry)).is_err() {
+                            cancel.store(true, Ordering::Relaxed);
+                            return;
+                        }
+                        if allow_descend {
+                            child_dirs.push(entry_path_buf.clone());
                         }
                     }
-                }
-                FileType::Symlink => {
-                    let entry = DirEntry::from_parts(
-                        entry_path.clone(),
-                        next_depth,
-                        FileType::Symlink,
-                        raw.ino,
-                        raw.size,
-                        raw.size,
-                        current_dev,
-                        None,
-                    );
-                    if sender.send(Ok(entry)).is_err() {
-                        cancel.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    if follow_symlinks && allow_descend {
-                        let path = PathBuf::from(OsStr::from_bytes(&entry_path));
-                        if std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false) {
-                            enqueue(&raw.name, &base_path);
-                        }
-                    }
-                }
-                _ => {
-                    let (apparent, disk, ino, dev, nlink) = if raw.size.is_some() {
-                        let name_c = CString::new(raw.name.clone()).ok();
-                        if let Some(name_c) = name_c {
-                            match hokori_sys::platform::stat_entry(fd, &name_c) {
-                                Ok(meta) => (
-                                    Some(meta.size),
-                                    Some(meta.alloc_size),
-                                    meta.ino,
-                                    meta.dev,
-                                    Some(meta.nlink),
-                                ),
-                                Err(_) => (raw.size, raw.size, raw.ino, current_dev, None),
+                    FileType::Unknown => {
+                        let entry_path = entry_path_buf.clone();
+                        if let Some(name_c) = name_to_cstr(&raw.name, &mut name_c_buf) {
+                            match hokori_sys::platform::stat_entry(fd, name_c) {
+                                Ok(meta) => {
+                                    let entry = DirEntry::from_parts(
+                                        entry_path,
+                                        next_depth,
+                                        meta.file_type,
+                                        meta.ino,
+                                        Some(meta.size),
+                                        Some(meta.alloc_size),
+                                        meta.dev,
+                                        Some(meta.nlink),
+                                    );
+                                    if sender.send(Ok(entry)).is_err() {
+                                        cancel.store(true, Ordering::Relaxed);
+                                        return;
+                                    }
+                                    if allow_descend && meta.file_type == FileType::Directory {
+                                        child_dirs.push(entry_path_buf.clone());
+                                    }
+                                }
+                                Err(_) => {
+                                    let entry = DirEntry::from_parts(
+                                        entry_path,
+                                        next_depth,
+                                        FileType::Unknown,
+                                        raw.ino,
+                                        None,
+                                        None,
+                                        current_dev,
+                                        None,
+                                    );
+                                    if sender.send(Ok(entry)).is_err() {
+                                        cancel.store(true, Ordering::Relaxed);
+                                    }
+                                }
                             }
                         } else {
-                            (raw.size, raw.size, raw.ino, current_dev, None)
-                        }
-                    } else {
-                        let name_c = CString::new(raw.name.clone()).ok();
-                        if let Some(name_c) = name_c {
-                            match hokori_sys::platform::stat_entry(fd, &name_c) {
-                                Ok(meta) => (
-                                    Some(meta.size),
-                                    Some(meta.alloc_size),
-                                    meta.ino,
-                                    meta.dev,
-                                    Some(meta.nlink),
-                                ),
-                                Err(_) => (None, None, raw.ino, current_dev, None),
+                            let entry = DirEntry::from_parts(
+                                entry_path,
+                                next_depth,
+                                FileType::Unknown,
+                                raw.ino,
+                                None,
+                                None,
+                                current_dev,
+                                None,
+                            );
+                            if sender.send(Ok(entry)).is_err() {
+                                cancel.store(true, Ordering::Relaxed);
                             }
-                        } else {
-                            (None, None, raw.ino, current_dev, None)
                         }
-                    };
+                    }
+                    FileType::Symlink => {
+                        let entry_path = entry_path_buf.clone();
+                        let entry = DirEntry::from_parts(
+                            entry_path.clone(),
+                            next_depth,
+                            FileType::Symlink,
+                            raw.ino,
+                            raw.size,
+                            raw.size,
+                            current_dev,
+                            None,
+                        );
+                        if sender.send(Ok(entry)).is_err() {
+                            cancel.store(true, Ordering::Relaxed);
+                            return;
+                        }
+                        if follow_symlinks && allow_descend {
+                            let path = PathBuf::from(OsStr::from_bytes(&entry_path));
+                            if std::fs::metadata(&path)
+                                .map(|m| m.is_dir())
+                                .unwrap_or(false)
+                            {
+                                child_dirs.push(entry_path);
+                            }
+                        }
+                    }
+                    _ => {
+                        let (apparent, disk, ino, dev, nlink) =
+                            if let Some(name_c) = name_to_cstr(&raw.name, &mut name_c_buf) {
+                                match hokori_sys::platform::stat_entry(fd, name_c) {
+                                    Ok(meta) => (
+                                        Some(meta.size),
+                                        Some(meta.alloc_size),
+                                        meta.ino,
+                                        meta.dev,
+                                        Some(meta.nlink),
+                                    ),
+                                    Err(_) => (raw.size, raw.size, raw.ino, current_dev, None),
+                                }
+                            } else {
+                                (raw.size, raw.size, raw.ino, current_dev, None)
+                            };
 
-                    let entry = DirEntry::from_parts(
-                        entry_path,
-                        next_depth,
-                        raw.file_type,
-                        ino,
-                        apparent,
-                        disk,
-                        dev,
-                        nlink,
-                    );
-                    if sender.send(Ok(entry)).is_err() {
-                        cancel.store(true, Ordering::Relaxed);
+                        let entry = DirEntry::from_parts(
+                            entry_path_buf.clone(),
+                            next_depth,
+                            raw.file_type,
+                            ino,
+                            apparent,
+                            disk,
+                            dev,
+                            nlink,
+                        );
+                        if sender.send(Ok(entry)).is_err() {
+                            cancel.store(true, Ordering::Relaxed);
+                        }
                     }
                 }
-            }
-        });
+            });
 
         if let Err(e) = result {
             self.send_error(&item.path, item.depth, map_sys_error(e));
@@ -312,6 +308,17 @@ impl WalkerWorker {
             kind,
         }));
     }
+}
+
+fn name_to_cstr<'a>(name: &[u8], buf: &'a mut Vec<u8>) -> Option<&'a CStr> {
+    if name.contains(&0) {
+        return None;
+    }
+
+    buf.clear();
+    buf.extend_from_slice(name);
+    buf.push(0);
+    CStr::from_bytes_with_nul(buf.as_slice()).ok()
 }
 
 fn map_sys_error(e: SysError) -> WalkErrorKind {

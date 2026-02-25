@@ -2,6 +2,9 @@ use hokori_sys::FileType;
 
 #[derive(Debug, Clone)]
 pub struct DirEntry {
+    // PERF: DirEntry owns a full path so walker workers can send entries over channels
+    // without borrowing lifetime coupling; prefix sharing/interning would reduce allocations
+    // but requires invasive redesign of message payloads and downstream consumers.
     path: Vec<u8>,
     pub depth: u16,
     pub file_type: FileType,

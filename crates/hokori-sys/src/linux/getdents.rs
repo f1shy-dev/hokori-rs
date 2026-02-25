@@ -58,6 +58,8 @@ pub fn parse_getdents_buf(buf: &[u8], n: usize, callback: &mut dyn FnMut(RawDirE
 
         if name != b"." && name != b".." {
             callback(RawDirEntry {
+                // PERF: RawDirEntry keeps owning `Vec<u8>` names to avoid threading short-lived
+                // borrowed lifetimes through public callback APIs across crates.
                 name: name.to_vec(),
                 file_type: d_type_to_file_type(d_type),
                 ino: d_ino,
