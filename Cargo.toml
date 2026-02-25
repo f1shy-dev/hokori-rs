@@ -17,3 +17,4 @@ repository = "https://github.com/f1shy-dev/hokori-rs"
 hokori-sys = { path = "crates/hokori-sys" }
 hokori-walker = { path = "crates/hokori-walker" }
 hokori-scan = { path = "crates/hokori-scan" }
+criterion = { version = "0.5", features = ["html_reports"] }
